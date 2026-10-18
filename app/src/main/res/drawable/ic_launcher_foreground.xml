@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 外框：代表容器/页面 -->
+    <path
+        android:pathData="M36,30 L72,30 A7,7 0 0 1 79,37 L79,71 A7,7 0 0 1 72,78 L36,78 A7,7 0 0 1 29,71 L29,37 A7,7 0 0 1 36,30 Z"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- 向下箭头：代表提取 -->
+    <path
+        android:pathData="M54,42 L54,64"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5"
+        android:strokeLineCap="round" />
+
+    <path
+        android:pathData="M44,55 L54,65 L64,55"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+</vector>

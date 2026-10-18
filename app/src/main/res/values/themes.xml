@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.IdExtractor" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <!-- 避免 vivo/OPPO 等系统的「强制深色」把界面反相 -->
+        <item name="android:forceDarkAllowed">false</item>
+    </style>
+
+    <color name="ic_launcher_background">#1F6F5C</color>
+</resources>
