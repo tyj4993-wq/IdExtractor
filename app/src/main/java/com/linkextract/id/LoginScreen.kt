@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -39,6 +38,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,24 +49,31 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import java.io.ByteArrayInputStream
 
-/** 伪装成普通 Chrome Mobile，去掉 WebView 的 "; wv" 标识 */
 private const val MOBILE_UA =
     "Mozilla/5.0 (Linux; Android 15; V2405A) AppleWebKit/537.36 " +
         "(KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
 
-/**
- * 页面引用了公网不可达的资源（tosv.byted.org），导致入场动画结束后内容仍被 CSS 隐藏。
- * 强制恢复可见性，并把视口滚动到第一个输入框。
- */
+/** 桌面版页面不引用移动端专用资源，可绕开 tosv.byted.org 的加载失败 */
+private const val DESKTOP_UA =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
+/** 该域名公网 DNS 无记录（NXDOMAIN），拦截以免拖住页面 */
+private const val BLOCK_HOST = "tosv.byted.org"
+
 private const val FORCE_VISIBLE_JS =
     "(function(){try{" +
-        "if(!document.getElementById('wb-force')){" +
-        "var s=document.createElement('style');s.id='wb-force';" +
-        "s.innerHTML='*{opacity:1!important;visibility:visible!important;}';" +
-        "(document.head||document.documentElement).appendChild(s);}" +
-        "var el=document.querySelector('input[type=tel],input[type=text],input,button');" +
-        "if(el&&el.scrollIntoView){el.scrollIntoView({block:'center'});}" +
+        "var all=document.querySelectorAll('*');" +
+        "for(var i=0;i<all.length;i++){var el=all[i];" +
+        "var t=el.tagName;if(t==='SCRIPT'||t==='STYLE'||t==='NOSCRIPT'||t==='TEMPLATE')continue;" +
+        "var cs=window.getComputedStyle(el);" +
+        "if(cs.display==='none')el.style.setProperty('display','block','important');" +
+        "if(cs.visibility==='hidden')el.style.setProperty('visibility','visible','important');" +
+        "if(cs.opacity==='0')el.style.setProperty('opacity','1','important');}" +
+        "var el=document.querySelector('input');" +
+        "if(el&&el.scrollIntoView)el.scrollIntoView({block:'center'});" +
         "}catch(e){}})()"
 
 @SuppressLint("SetJavaScriptEnabled")
@@ -81,12 +88,11 @@ fun LoginScreen(
     var message by remember { mutableStateOf<String?>(null) }
     var webView by remember { mutableStateOf<WebView?>(null) }
 
-    // 诊断信息
     var mainError by remember { mutableStateOf<String?>(null) }
     var subErrors by remember { mutableStateOf<List<String>>(emptyList()) }
     var pageProbe by remember { mutableStateOf<String?>(null) }
 
-    // 手动粘贴 Cookie
+    var useDesktop by rememberSaveable { mutableStateOf(true) }
     var showPaste by remember { mutableStateOf(false) }
     var pasteText by remember { mutableStateOf("") }
 
@@ -201,22 +207,23 @@ fun LoginScreen(
             )
         }
 
-        // 诊断摘要：始终显示一行，便于判断渲染状态
-        val summary = buildSummary(mainError, pageProbe)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 4.dp),
+                .padding(horizontal = 12.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = summary,
+                text = buildSummary(mainError, pageProbe),
                 modifier = Modifier.weight(1f),
                 fontSize = 9.sp,
                 lineHeight = 12.sp,
                 fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            TextButton(onClick = { useDesktop = !useDesktop }) {
+                Text(if (useDesktop) "桌面" else "手机", fontSize = 11.sp)
+            }
             TextButton(onClick = { reload() }) { Text("刷新", fontSize = 11.sp) }
         }
 
@@ -269,9 +276,8 @@ fun LoginScreen(
                     settings.mediaPlaybackRequiresUserGesture = false
                     settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                     settings.cacheMode = WebSettings.LOAD_DEFAULT
-                    settings.userAgentString = MOBILE_UA
+                    settings.userAgentString = if (useDesktop) DESKTOP_UA else MOBILE_UA
 
-                    // 关闭 WebView 的算法深色，避免页面被强制反相后变黑
                     if (Build.VERSION.SDK_INT >= 29) {
                         runCatching { settings.forceDark = WebSettings.FORCE_DARK_OFF }
                     }
@@ -283,6 +289,19 @@ fun LoginScreen(
                     CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
 
                     webViewClient = object : WebViewClient() {
+                        override fun shouldInterceptRequest(
+                            view: WebView?,
+                            request: WebResourceRequest?
+                        ): WebResourceResponse? {
+                            if (request?.url?.host == BLOCK_HOST) {
+                                return WebResourceResponse(
+                                    "text/plain", "utf-8", 404, "Not Found",
+                                    emptyMap(), ByteArrayInputStream(ByteArray(0))
+                                )
+                            }
+                            return null
+                        }
+
                         override fun onPageStarted(
                             view: WebView?,
                             url: String?,
@@ -293,7 +312,6 @@ fun LoginScreen(
                         }
 
                         override fun onPageFinished(view: WebView?, url: String?) {
-                            // 立即 + 分两次补注，覆盖页面入场动画对可见性的反复改写
                             view?.evaluateJavascript(FORCE_VISIBLE_JS, null)
                             view?.postDelayed({ view.evaluateJavascript(FORCE_VISIBLE_JS, null) }, 1200)
                             view?.postDelayed({ view.evaluateJavascript(FORCE_VISIBLE_JS, null) }, 3000)
@@ -309,8 +327,9 @@ fun LoginScreen(
                                         "var BG=cs?cs.backgroundColor.replace(/\\s/g,''):'';" +
                                         "var FG=cs?cs.color.replace(/\\s/g,''):'';" +
                                         "var D=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'1':'0';" +
-                                        "var X=(b&&b.innerText?b.innerText:'').replace(/\\s+/g,' ').slice(0,100).replace(/\\|/g,'/');" +
-                                        "return [L,H,BG,FG,D,T,X].join('|');" +
+                                        "var I=document.querySelectorAll('input').length;" +
+                                        "var X=(b&&b.innerText?b.innerText:'').replace(/\\s+/g,' ').slice(0,90).replace(/\\|/g,'/');" +
+                                        "return [L,H,BG,FG,D,'input:'+I,T,X].join('|');" +
                                         "}catch(e){return 'ERR|'+e.message}})()"
                                 ) { result ->
                                     pageProbe = result
@@ -367,25 +386,33 @@ fun LoginScreen(
                     loadUrl(IpApi.loginUrl())
                     webView = this
                 }
+            },
+            update = { wv ->
+                val ua = if (useDesktop) DESKTOP_UA else MOBILE_UA
+                if (wv.settings.userAgentString != ua) {
+                    wv.settings.userAgentString = ua
+                    mainError = null
+                    subErrors = emptyList()
+                    pageProbe = null
+                    wv.loadUrl(IpApi.loginUrl())
+                }
             }
         )
     }
 }
 
-/** 渲染探测结果按 | 分割 */
 private fun parseProbe(raw: String?): List<String> {
     if (raw == null) return emptyList()
     return raw.trim().removeSurrounding("\"").split("|")
 }
 
-/** 始终显示的一行摘要 */
 private fun buildSummary(mainError: String?, pageProbe: String?): String {
     if (mainError != null) return mainError
 
     val p = parseProbe(pageProbe)
-    if (p.size < 5) return "加载中…（等待渲染探测）"
+    if (p.size < 6) return "加载中…（等待渲染探测）"
 
-    return "DOM ${p[0]}B · 高 ${p[1]}px · bg ${p[2]} · fg ${p[3]} · dark=${p[4]}"
+    return "DOM ${p[0]}B · 高 ${p[1]}px · bg ${p[2]} · ${p[5]}"
 }
 
 private fun buildDiagnosis(
@@ -401,9 +428,9 @@ private fun buildDiagnosis(
 
     return buildString {
         mainError?.let { appendLine(it) }
-        if (p.size >= 7) {
-            appendLine("标题: ${p[5]}")
-            appendLine("正文: ${p[6]}")
+        if (p.size >= 8) {
+            appendLine("标题: ${p[6]}")
+            appendLine("正文: ${p[7]}")
         } else if (pageProbe != null) {
             appendLine("原始探测: ${pageProbe.take(300)}")
         }
