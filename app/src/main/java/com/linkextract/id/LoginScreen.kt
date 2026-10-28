@@ -55,6 +55,20 @@ private const val MOBILE_UA =
     "Mozilla/5.0 (Linux; Android 15; V2405A) AppleWebKit/537.36 " +
         "(KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
 
+/**
+ * 页面引用了公网不可达的资源（tosv.byted.org），导致入场动画结束后内容仍被 CSS 隐藏。
+ * 强制恢复可见性，并把视口滚动到第一个输入框。
+ */
+private const val FORCE_VISIBLE_JS =
+    "(function(){try{" +
+        "if(!document.getElementById('wb-force')){" +
+        "var s=document.createElement('style');s.id='wb-force';" +
+        "s.innerHTML='*{opacity:1!important;visibility:visible!important;}';" +
+        "(document.head||document.documentElement).appendChild(s);}" +
+        "var el=document.querySelector('input[type=tel],input[type=text],input,button');" +
+        "if(el&&el.scrollIntoView){el.scrollIntoView({block:'center'});}" +
+        "}catch(e){}})()"
+
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun LoginScreen(
@@ -100,7 +114,7 @@ fun LoginScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = "适用于页面在 App 内打不开的情况。在电脑浏览器操作：\n" +
+                        text = "此方式需要电脑，手机上无法直接复制 Cookie。\n\n在电脑浏览器操作：\n" +
                             "1. 登录 shortdramas.com 并进入 IP 库\n" +
                             "2. 按 F12 打开开发者工具\n" +
                             "3. 切到 Network（网络）标签，刷新页面\n" +
@@ -279,6 +293,11 @@ fun LoginScreen(
                         }
 
                         override fun onPageFinished(view: WebView?, url: String?) {
+                            // 立即 + 分两次补注，覆盖页面入场动画对可见性的反复改写
+                            view?.evaluateJavascript(FORCE_VISIBLE_JS, null)
+                            view?.postDelayed({ view.evaluateJavascript(FORCE_VISIBLE_JS, null) }, 1200)
+                            view?.postDelayed({ view.evaluateJavascript(FORCE_VISIBLE_JS, null) }, 3000)
+
                             view?.postDelayed({
                                 view.evaluateJavascript(
                                     "(function(){try{" +
