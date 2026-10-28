@@ -4,12 +4,14 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Build
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
@@ -19,15 +21,17 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -68,6 +72,10 @@ fun LoginScreen(
     var subErrors by remember { mutableStateOf<List<String>>(emptyList()) }
     var pageProbe by remember { mutableStateOf<String?>(null) }
 
+    // 手动粘贴 Cookie
+    var showPaste by remember { mutableStateOf(false) }
+    var pasteText by remember { mutableStateOf("") }
+
     fun reload() {
         mainError = null
         subErrors = emptyList()
@@ -78,6 +86,54 @@ fun LoginScreen(
     BackHandler {
         val wv = webView
         if (wv != null && wv.canGoBack()) wv.goBack() else onCancel()
+    }
+
+    if (showPaste) {
+        AlertDialog(
+            onDismissRequest = { showPaste = false },
+            title = { Text("手动粘贴 Cookie") },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 320.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "适用于页面在 App 内打不开的情况。在电脑浏览器操作：\n" +
+                            "1. 登录 shortdramas.com 并进入 IP 库\n" +
+                            "2. 按 F12 打开开发者工具\n" +
+                            "3. 切到 Network（网络）标签，刷新页面\n" +
+                            "4. 点列表里任意一个同名请求\n" +
+                            "5. 在 Headers → Request Headers 找到 Cookie\n" +
+                            "6. 复制冒号后面的整段内容，粘贴到下面",
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp
+                    )
+                    OutlinedTextField(
+                        value = pasteText,
+                        onValueChange = { pasteText = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 110.dp),
+                        placeholder = { Text("粘贴 Cookie 值…", fontSize = 12.sp) },
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp)
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val v = pasteText.trim()
+                    if (v.isNotBlank()) {
+                        onDone(v)
+                        showPaste = false
+                    }
+                }) { Text("保存") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPaste = false }) { Text("取消") }
+            }
+        )
     }
 
     Column(
@@ -131,13 +187,31 @@ fun LoginScreen(
             )
         }
 
-        // 诊断区：只有在出错或探测异常时出现
+        // 诊断摘要：始终显示一行，便于判断渲染状态
+        val summary = buildSummary(mainError, pageProbe)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = summary,
+                modifier = Modifier.weight(1f),
+                fontSize = 9.sp,
+                lineHeight = 12.sp,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            TextButton(onClick = { reload() }) { Text("刷新", fontSize = 11.sp) }
+        }
+
         val diagnosis = buildDiagnosis(mainError, subErrors, pageProbe)
         if (diagnosis != null) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 180.dp)
+                    .heightIn(max = 150.dp)
                     .background(MaterialTheme.colorScheme.errorContainer)
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -145,20 +219,20 @@ fun LoginScreen(
             ) {
                 Text(
                     text = diagnosis,
-                    fontSize = 10.sp,
-                    lineHeight = 14.sp,
+                    fontSize = 9.sp,
+                    lineHeight = 13.sp,
                     fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onErrorContainer
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    TextButton(onClick = { reload() }) { Text("刷新", fontSize = 12.sp) }
                     TextButton(onClick = {
                         runCatching {
                             context.startActivity(
                                 Intent(Intent.ACTION_VIEW, Uri.parse(IpApi.loginUrl()))
                             )
                         }
-                    }) { Text("用浏览器打开", fontSize = 12.sp) }
+                    }) { Text("用浏览器打开", fontSize = 11.sp) }
+                    TextButton(onClick = { showPaste = true }) { Text("粘贴 Cookie", fontSize = 11.sp) }
                 }
             }
         }
@@ -179,9 +253,17 @@ fun LoginScreen(
                     settings.displayZoomControls = false
                     settings.javaScriptCanOpenWindowsAutomatically = true
                     settings.mediaPlaybackRequiresUserGesture = false
-                    settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                    settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
+                    settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    settings.cacheMode = WebSettings.LOAD_DEFAULT
                     settings.userAgentString = MOBILE_UA
+
+                    // 关闭 WebView 的算法深色，避免页面被强制反相后变黑
+                    if (Build.VERSION.SDK_INT >= 29) {
+                        runCatching { settings.forceDark = WebSettings.FORCE_DARK_OFF }
+                    }
+                    if (Build.VERSION.SDK_INT >= 33) {
+                        runCatching { settings.isAlgorithmicDarkeningAllowed = false }
+                    }
 
                     CookieManager.getInstance().setAcceptCookie(true)
                     CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
@@ -200,14 +282,19 @@ fun LoginScreen(
                             view?.postDelayed({
                                 view.evaluateJavascript(
                                     "(function(){try{" +
-                                        "return JSON.stringify({" +
-                                        "t:document.title||''," +
-                                        "len:document.documentElement?document.documentElement.outerHTML.length:-1," +
-                                        "txt:(document.body&&document.body.innerText?document.body.innerText:'').replace(/\\s+/g,' ').slice(0,120)," +
-                                        "scripts:document.scripts?document.scripts.length:0" +
-                                        "});}catch(e){return 'ERR:'+e.message}})()"
+                                        "var b=document.body;" +
+                                        "var cs=b?getComputedStyle(b):null;" +
+                                        "var L=document.documentElement?document.documentElement.outerHTML.length:-1;" +
+                                        "var H=document.documentElement?document.documentElement.scrollHeight:-1;" +
+                                        "var T=(document.title||'').replace(/\\|/g,'/');" +
+                                        "var BG=cs?cs.backgroundColor.replace(/\\s/g,''):'';" +
+                                        "var FG=cs?cs.color.replace(/\\s/g,''):'';" +
+                                        "var D=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'1':'0';" +
+                                        "var X=(b&&b.innerText?b.innerText:'').replace(/\\s+/g,' ').slice(0,100).replace(/\\|/g,'/');" +
+                                        "return [L,H,BG,FG,D,T,X].join('|');" +
+                                        "}catch(e){return 'ERR|'+e.message}})()"
                                 ) { result ->
-                                    pageProbe = "DOM探测: $result"
+                                    pageProbe = result
                                 }
                             }, 2500)
                         }
@@ -251,8 +338,7 @@ fun LoginScreen(
 
                         override fun onConsoleMessage(msg: ConsoleMessage?): Boolean {
                             if (msg == null) return true
-                            val level = msg.messageLevel()
-                            if (level == ConsoleMessage.MessageLevel.ERROR) {
+                            if (msg.messageLevel() == ConsoleMessage.MessageLevel.ERROR) {
                                 subErrors = (subErrors + "JS错误: ${msg.message().take(160)}").take(6)
                             }
                             return true
@@ -267,27 +353,44 @@ fun LoginScreen(
     }
 }
 
+/** 渲染探测结果按 | 分割 */
+private fun parseProbe(raw: String?): List<String> {
+    if (raw == null) return emptyList()
+    return raw.trim().removeSurrounding("\"").split("|")
+}
+
+/** 始终显示的一行摘要 */
+private fun buildSummary(mainError: String?, pageProbe: String?): String {
+    if (mainError != null) return mainError
+
+    val p = parseProbe(pageProbe)
+    if (p.size < 5) return "加载中…（等待渲染探测）"
+
+    return "DOM ${p[0]}B · 高 ${p[1]}px · bg ${p[2]} · fg ${p[3]} · dark=${p[4]}"
+}
+
 private fun buildDiagnosis(
     mainError: String?,
     subErrors: List<String>,
     pageProbe: String?
 ): String? {
-    val domLen = pageProbe
-        ?.let { Regex("\"len\":(\\d+)").find(it)?.groupValues?.get(1)?.toIntOrNull() }
-    val renderFailed = domLen != null && domLen < 3000
+    if (mainError == null && subErrors.isEmpty() && pageProbe == null) return null
 
-    if (mainError == null && subErrors.isEmpty() && !renderFailed) return null
+    val p = parseProbe(pageProbe)
+    val domLen = p.getOrNull(0)?.toIntOrNull()
+    val renderFailed = domLen != null && domLen < 3000
 
     return buildString {
         mainError?.let { appendLine(it) }
-
-        if (pageProbe != null) {
-            appendLine(pageProbe)
-            if (renderFailed) appendLine("→ 页面骨架过小（${domLen} 字节），JS 未完成渲染")
+        if (p.size >= 7) {
+            appendLine("标题: ${p[5]}")
+            appendLine("正文: ${p[6]}")
+        } else if (pageProbe != null) {
+            appendLine("原始探测: ${pageProbe.take(300)}")
         }
-
+        if (renderFailed) appendLine("→ 骨架过小（${domLen}B），JS 未完成渲染")
         if (subErrors.isNotEmpty()) {
-            appendLine("资源/脚本异常 ${subErrors.size} 条：")
+            appendLine("异常 ${subErrors.size} 条：")
             subErrors.forEach { appendLine("· $it") }
         }
     }.trim().ifBlank { null }
